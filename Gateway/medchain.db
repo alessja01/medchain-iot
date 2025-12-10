@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS reports(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    heart_rate INTEGER,
+    spo2 INTEGER,
+    temperature REAL,
+    hmac TEXT NOT NULL,
+    nonce BLOB NOT NULL,
+    ciphertext BLOB NOT NULL,
+    tag BLOB NOT NULL,
+    hash TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
