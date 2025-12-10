@@ -1,0 +1,9 @@
+{
+  "name": "Blockchain",
+  "version": "1.0.0",
+  "type": "module",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@types/minimatch": "^6.0.0"
+  }
+}
