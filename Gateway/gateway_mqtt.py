@@ -1,28 +1,30 @@
 import json
-import sqlite3
 import hmac
 import hashlib
 import sqlite3
 import paho.mqtt.client as mqtt
-
 from crypto_utils import encrypt_aes_gcm_256, hash_sha256
 
-#configurazione MQTT
 
+###################CONFIGURAZIONE MQTT
 BROKER= "broker.hivemq.com" 
 PORT=1883
 TOPIC= "medchain/patient1" # topic dove l'esp32 pubblicherà i dati
 
 
-#CHIAVE HMAC
+###################CHIAVE HMAC
 HMAC_KEY=b"supersecretHMACkey42"
 
 
-#CHIAVE AES-256 (32 byte)
+####################CHIAVE AES-256 (32 byte)
 AES_KEY=bytes.fromhex(
     "00112233445566778899aabbccddeeff"
     "00112233445566778899aabbccddeeff"
 )
+
+######################CONGIG DB
+DB_PATH="medchain.db"
+
 
 #FUNZIONE DI SUPPORTO: STRINGA CANONICA
 def build_canonical_string(device_id, timestamp, heart_rate, spo2, temperature):
@@ -76,10 +78,10 @@ def process_measurements(measurements: dict, raw_payload: str):
 
     #Confronto: se diverso → messaggio NON autentico
     if not hmac.compare_digest(hmac_calc, hmac_recv):
-        print("[ERRORE] HMAC NON VALIDO! Messaggio rifiutato ❌")
+        print("[ERRORE] HMAC NON VALIDO! Messaggio rifiutato ")
         return
     else:
-        print("[HMAC] Firma valida. Messaggio autentico ✅")
+        print("[HMAC] Firma valida. Messaggio autentico ")
 
     # --- DA QUI IN GIÙ: dato considerato autentico ---
 
@@ -97,12 +99,12 @@ def process_measurements(measurements: dict, raw_payload: str):
     print(f"         Ciphertext (hex): {ciphertext.hex()}")
     print(f"         Tag (hex):        {tag.hex()}")
 
-     # --- salvataggio nel database SQLite ---
-    save_report(
+    row_id = save_report(
         device_id, timestamp, heart_rate, spo2, temperature,
         hmac_recv, nonce, ciphertext, tag, h
     )
     print("\n[SQL] Report salvato correttamente nel database.")
+    print(f"[INFO] offchainRef potrà essere l'id={row_id} nella blockchain.")
 
 
 
@@ -122,7 +124,7 @@ def on_message(client, userdata, msg):
 
 
 def init_db():
-    conn=sqlite3.connect("medchain.db")
+    conn=sqlite3.connect(DB_PATH)
     cur= conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reports(
@@ -138,14 +140,16 @@ def init_db():
             tag BLOB NOT NULL,
             hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP    
-                )
+                );
     """)
     conn.commit()
     conn.close()
+    print("[SQL] tabella 'reports' pronta")
 
-def save_report(device_id, timestamp, heart_rate, spo2, temperature,hmac_recv, nonce, ciphertext, tag, hashed):
+def save_report(device_id, timestamp, heart_rate, spo2, temperature,
+                hmac_recv, nonce, ciphertext, tag, hashed):
 
-    conn = sqlite3.connect("medchain.db")
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO reports
@@ -153,11 +157,22 @@ def save_report(device_id, timestamp, heart_rate, spo2, temperature,hmac_recv, n
          hmac, nonce, ciphertext, tag, hash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        device_id, timestamp, heart_rate, spo2, temperature,
-        hmac_recv, nonce, ciphertext, tag, hashed
+        device_id,
+        int(timestamp),
+        int(heart_rate),
+        int(spo2),
+        float(temperature),
+        hmac_recv,
+        nonce,
+        ciphertext,
+        tag,
+        hashed
     ))
     conn.commit()
+    row_id = cur.lastrowid
     conn.close()
+    print(f"[SQL] Report salvato con id={row_id}")
+    return row_id
 
 
 def main():
