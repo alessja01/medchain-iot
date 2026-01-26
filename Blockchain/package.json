@@ -4,6 +4,7 @@
   "type": "module",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",
-    "@types/minimatch": "^6.0.0"
+    "@types/minimatch": "^6.0.0",
+    "@types/node": "^25.0.10"
   }
 }
