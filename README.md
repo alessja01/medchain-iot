@@ -1,6 +1,9 @@
-#🩺 MEDCHAIN IOT
-MedChain IoT è un sistema di monitoraggio medico basato su IOT e Blockchain che consente la raccolta, proiezione e la verifica dei dati clinici dei pazienti, garantendo integrità, autenticità e confidenzialità delle informazioni sanitarie.
-Il progetto utilizza dispositivi IOT (ESP32/ Arduino con sensori medici) per la misurazione dei parametri vitali e una blockchain per certificare l'origine e l'immutabilità dei dati, senza memorizzare informazioni sensibili on-chain
+# 🩺 MedChain IoT
+
+**MedChain IoT** è un sistema di monitoraggio medico basato su **IoT e Blockchain** che consente la raccolta, la protezione e la verifica dei dati clinici dei pazienti, garantendo **integrità, autenticità e confidenzialità** delle informazioni sanitarie.
+
+Il progetto utilizza dispositivi IoT (ESP32 / Arduino con sensori medici) per la misurazione dei parametri vitali e una blockchain per certificare l’origine e l’immutabilità dei dati, senza memorizzare informazioni sensibili on-chain.
+
 -----
 ## 📖 Descrizione del progetto 
 Medchain IOT nasce con l'obiettivo di risolvere uno dei principali problemi della sanità digitale: 
