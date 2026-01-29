@@ -9,6 +9,7 @@ from blockchain_client import register_report_onchain
 
 
 
+
 ###################CONFIGURAZIONE MQTT
 BROKER= "broker.hivemq.com" 
 PORT=1883
@@ -25,7 +26,7 @@ DB_PATH="medchain.db"
 
 #FUNZIONE DI SUPPORTO: STRINGA CANONICA
 def build_canonical_string(device_id, timestamp, heart_rate, spo2, temperature):
-    return f"{device_id}|{timestamp}|{heart_rate}|{spo2}|{temperature:.2f}"
+    return f"{device_id}|{timestamp}|{heart_rate}|{spo2}|{temperature}"
 
 #Callback quando il client MQTT si connette al broker
 def on_connect(client, userdata, flags, rc):
@@ -40,7 +41,7 @@ def process_measurements(measurements: dict, raw_payload: str):
         timestamp   = measurements["timestamp"]
         heart_rate  = measurements["heartRate"]
         spo2        = measurements["spo2"]
-        temperature = float(measurements["temperature"])
+        temperature = int(round(float(measurements["temperature"] * 100))) # due decimali
         hmac_recv   = measurements["hmac"]
     except KeyError as e:
         print("[ERRORE] Manca il campo JSON:", e)
@@ -87,8 +88,8 @@ def process_measurements(measurements: dict, raw_payload: str):
     # 3b) Cifra la data_key con la chiave pubblica del medico
     enc_key = encrypt_key_for_doctor(data_key, "doctor_public.pem")
 
-    # 4) Hash del cifrato+tag (integrità / blockchain)
-    hash_input = ciphertext + tag
+    # 4) Hash del cifrato+tag + nonce per verificare integrità(integrità / blockchain)
+    hash_input = nonce +  ciphertext + tag
     h = hash_sha256(hash_input)
 
     print("\n[CRITTO] AES-256-GCM COMPLETATO")
@@ -110,12 +111,11 @@ def process_measurements(measurements: dict, raw_payload: str):
     # 6) Salva ON-CHAIN (Blockchain) metadati + hash + offchainRef
     try:
         txh = register_report_onchain(
-            device_id=device_id,
+            device_id_str=device_id,
             timestamp=int(timestamp),
             hash_hex=h,
-            offchain_ref=row_id,
-            hmac_str=hmac_recv
-        )
+            offchain_ref=row_id
+        );
         print("[BLOCKCHAIN] Registrato on-chain:", txh)
     except Exception as e:
         print("[BLOCKCHAIN][ERRORE] Registrazione on-chain fallita:", e)

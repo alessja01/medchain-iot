@@ -187,11 +187,12 @@ void publishVitals() {
 
   //COSTRUISCO LA STRINGA CANONICA
   //  deviceID|timestamp|heartRate|spo2|temperatore_con_2_decimali
+  int tempCenti= (int)lround(temperature*100.0); //temperatura in centigradi (2 decimali)
   String toSign=  String(deviceId)+"|"+
                   String(timestamp)+"|"+
                   String(heartRate)+"|"+
                   String(spo2)+"|"+
-                  String(temperature,2);
+                  String(tempCenti);
   
   //CALCOLO HMAC-SHA256 della stringa
   String hmac= computeHmacSha256(toSign);
@@ -207,7 +208,7 @@ void publishVitals() {
   doc["timestamp"]  = getEpochTime(); //Timestamp corrente
   doc["heartRate"]  = readHeartRate();//Battito 
   doc["spo2"]       = readSpO2();     //Sp02
-  doc["temperature"]= temperature;    //Temperatura misurata
+  doc["temperature"]= tempCenti;    //Temperatura misurata
   doc["hmac"]       =hmac;//firma di autencità del messaggio 
 
   String payload;
