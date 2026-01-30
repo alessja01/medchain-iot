@@ -115,3 +115,27 @@ Lo smart contract conserva la chiave pubblica del dispositivo IoT e:
 3. verifica il timestamp
 4. registra il report solo se valido
 
+--- 
+## One-time setup
+
+Dopo il deploy dello smart contract è necessario autorizzare
+i dispositivi IoT che possono inviare report.
+
+Eseguire una sola volta:
+
+```bash
+python blockchain_client.py
+
+
+---
+
+### 🔹 Esecuzione normale
+
+```markdown
+## Run the system
+
+1. Avvia Hardhat node
+2. Avvia il gateway
+3. Avvia il dispositivo IoT (ESP32)
+
+Il gateway invierà automaticamente i report on-chain.
