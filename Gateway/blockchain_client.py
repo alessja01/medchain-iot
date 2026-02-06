@@ -31,11 +31,15 @@ def load_contract(w3: Web3):
 
 
 def ensure_bytes32(hex_hash: str) -> bytes:
+    """
+    Converte una stringa hex da 64 caratteri (32 bytes) in bytes32.
+    Accetta anche "0x....".
+    """
     h = hex_hash.lower().strip()
     if h.startswith("0x"):
         h = h[2:]
     if len(h) != 64:
-        raise ValueError("Hash deve essere 64 caratteri hex")
+        raise ValueError("Hash deve essere 64 caratteri hex (bytes32)")
     return Web3.to_bytes(hexstr="0x" + h)
 
 
@@ -46,7 +50,18 @@ def _send_tx(w3, signed):
     return receipt
 
 
-def register_report_onchain(device_id_str: str, timestamp: int, hash_hex: str, offchain_ref: int, patient_addr: str = DEFAULT_PATIENT):
+def register_report_onchain(
+    device_id_str: str,
+    timestamp: int,
+    hash_hex: str,
+    offchain_ref: int,
+    gateway_sig_hash_hex: str,          # ✅ NUOVO parametro
+    patient_addr: str = DEFAULT_PATIENT
+):
+    """
+    Registra report on-chain includendo anche gatewaySigHash.
+    gatewaySigHash = bytes32 (di solito keccak256(firmaEd25519DelGateway)).
+    """
     w3 = Web3(Web3.HTTPProvider(HARDHAT_RPC))
     if not w3.is_connected():
         raise RuntimeError("Hardhat node non raggiungibile")
@@ -59,13 +74,15 @@ def register_report_onchain(device_id_str: str, timestamp: int, hash_hex: str, o
 
     device_id_hash = Web3.keccak(text=device_id_str)
     hash_b32 = ensure_bytes32(hash_hex)
+    gateway_sig_hash_b32 = ensure_bytes32(gateway_sig_hash_hex)
 
     tx = contract.functions.registerReport(
         Web3.to_checksum_address(patient_addr),
         device_id_hash,
         int(timestamp),
         hash_b32,
-        int(offchain_ref)
+        int(offchain_ref),
+        gateway_sig_hash_b32          # ✅ NUOVO argomento
     ).build_transaction({
         "from": acct.address,
         "nonce": w3.eth.get_transaction_count(acct.address),

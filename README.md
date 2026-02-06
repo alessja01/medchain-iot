@@ -46,12 +46,12 @@ Il sistema permette di:
 - Sensori medicali (battito cardiaco, SpO₂, temperatura)
 
 ### 💻 Software & Sicurezza
-- **Comunicazione**: MQTT su TLS (MQTTS)
-- **Firma digitale**: Ed25519 (device e gateway)
-- **Cifratura dati**: AES-256-GCM
-- **Protezione chiavi**: RSA-OAEP (chiave del medico)
-- **Hashing**: SHA-256
-- **Anti-replay**: counter monotono + timestamp
+- **Comunicazione**: MQTT su TLS (MQTTS)  
+- **Firma digitale**: Ed25519 (device e gateway)  
+- **Cifratura dati**: AES-256-GCM  
+- **Protezione chiavi**: RSA-OAEP (chiave del medico)  
+- **Hashing**: SHA-256  
+- **Anti-replay**: counter monotono + timestamp  
 
 ### ⛓️ Blockchain
 - Smart contract Ethereum (Hardhat)

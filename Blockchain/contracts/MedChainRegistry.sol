@@ -5,11 +5,8 @@ contract MedChainRegistry {
     // =========================
     // ADMIN / OWNER
     // =========================
-
-    // Account amministratore (ospedale / admin di sistema)
     address public owner;
 
-    // Modifier: permette l’esecuzione solo all’owner
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
         _;
@@ -18,8 +15,6 @@ contract MedChainRegistry {
     // =========================
     // GATEWAY ALLOWLIST
     // =========================
-
-    // Solo questi indirizzi possono registrare report
     mapping(address => bool) public trustedGateway;
 
     event GatewayAuthorized(address indexed gateway);
@@ -28,12 +23,6 @@ contract MedChainRegistry {
     // =========================
     // DEVICE REGISTRY
     // =========================
-
-    /**
-     * deviceIdHash = keccak256(bytes(deviceIdString))
-     * Esempio: deviceIdString = "esp32-001"
-     * deviceIdHash è bytes32, più economico della stringa su chain.
-     */
     mapping(bytes32 => bool) public deviceAuthorized;
 
     event DeviceAuthorized(bytes32 indexed deviceIdHash);
@@ -42,8 +31,6 @@ contract MedChainRegistry {
     // =========================
     // ACCESS CONTROL PAZIENTE -> MEDICO
     // =========================
-
-    // patient => doctor => allowed
     mapping(address => mapping(address => bool)) public isDoctorAllowed;
 
     event AccessGranted(address indexed patient, address indexed doctor);
@@ -52,23 +39,23 @@ contract MedChainRegistry {
     // =========================
     // REPORT STORAGE + ANTI-REPLAY
     // =========================
-
     struct Report {
-        bytes32 deviceIdHash;     // ID device (hash)
-        uint256 timestamp;        // epoch seconds
-        bytes32 hashCiphertext;   // hash del blob cifrato (consiglio: nonce||ciphertext||tag)
-        uint256 offchainRef;      // riferimento off-chain (id SQLite)
-        address patient;          // paziente owner dei dati
-        address submittedBy;      // gateway che ha registrato (msg.sender)
+        bytes32 deviceIdHash;
+        uint256 timestamp;
+        bytes32 hashCiphertext;
+        uint256 offchainRef;
+        address patient;
+        address submittedBy;
+
+        // ✅ NUOVO: hash della firma del gateway sul canonical REPORT
+        // (es. keccak256(signatureEd25519HexBytes))
+        bytes32 gatewaySigHash;
     }
 
-    // contatore report
     uint256 public reportsCount;
-
-    // mapping reportId -> hint metadati report
     mapping(uint256 => Report) private reports;
 
-    // Anti-duplicati: impedisce di registrare lo stesso hash più volte
+    // anti-duplicati sul blob cifrato
     mapping(bytes32 => bool) public usedHash;
 
     event ReportRegistered(
@@ -78,21 +65,19 @@ contract MedChainRegistry {
         uint256 timestamp,
         bytes32 hashCiphertext,
         uint256 offchainRef,
-        address submittedBy
+        address submittedBy,
+        bytes32 gatewaySigHash // ✅ NUOVO
     );
 
-    // Evento audit quando qualcuno accede a un report tramite accessReport()
     event ReportAccessed(uint256 indexed reportId, address indexed accessor);
 
     // =========================
     // CONSTRUCTOR
     // =========================
-
     constructor() {
-        // chi deploya il contratto diventa owner
         owner = msg.sender;
 
-        // bootstrap: l’owner è considerato gateway fidato
+        // bootstrap: owner è gateway fidato
         trustedGateway[msg.sender] = true;
         emit GatewayAuthorized(msg.sender);
     }
@@ -100,8 +85,6 @@ contract MedChainRegistry {
     // =========================
     // OWNER MANAGEMENT
     // =========================
-
-    // Cambia owner (es. passaggio da account #0 a un multisig)
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "Owner zero");
         owner = newOwner;
@@ -110,15 +93,12 @@ contract MedChainRegistry {
     // =========================
     // GATEWAY MANAGEMENT
     // =========================
-
-    // Autorizza un gateway a registrare report
     function authorizeGateway(address gateway) external onlyOwner {
         require(gateway != address(0), "Gateway zero");
         trustedGateway[gateway] = true;
         emit GatewayAuthorized(gateway);
     }
 
-    // Revoca un gateway (non potrà più registrare report)
     function revokeGateway(address gateway) external onlyOwner {
         require(gateway != address(0), "Gateway zero");
         trustedGateway[gateway] = false;
@@ -128,15 +108,12 @@ contract MedChainRegistry {
     // =========================
     // DEVICE MANAGEMENT
     // =========================
-
-    // Autorizza un device (deviceIdHash)
     function authorizeDevice(bytes32 deviceIdHash) external onlyOwner {
         require(deviceIdHash != bytes32(0), "deviceIdHash zero");
         deviceAuthorized[deviceIdHash] = true;
         emit DeviceAuthorized(deviceIdHash);
     }
 
-    // Revoca un device (es. compromesso)
     function revokeDevice(bytes32 deviceIdHash) external onlyOwner {
         require(deviceIdHash != bytes32(0), "deviceIdHash zero");
         deviceAuthorized[deviceIdHash] = false;
@@ -146,15 +123,12 @@ contract MedChainRegistry {
     // =========================
     // PAZIENTE -> MEDICO ACL
     // =========================
-
-    // Il paziente concede accesso a un medico
     function grantAccess(address doctor) external {
         require(doctor != address(0), "Doctor zero");
         isDoctorAllowed[msg.sender][doctor] = true;
         emit AccessGranted(msg.sender, doctor);
     }
 
-    // Il paziente revoca accesso
     function revokeAccess(address doctor) external {
         require(doctor != address(0), "Doctor zero");
         isDoctorAllowed[msg.sender][doctor] = false;
@@ -164,20 +138,13 @@ contract MedChainRegistry {
     // =========================
     // REPORT REGISTRATION
     // =========================
-
-    /**
-     * registerReport:
-     * - solo gateway fidato può chiamarla
-     * - device deve essere autorizzato
-     * - hash non deve essere duplicato (anti-replay)
-     * - salva metadati e emette evento
-     */
     function registerReport(
         address patient,
         bytes32 deviceIdHash,
         uint256 timestamp,
         bytes32 hashCiphertext,
-        uint256 offchainRef
+        uint256 offchainRef,
+        bytes32 gatewaySigHash // ✅ NUOVO parametro
     ) external returns (uint256) {
         // 1) Solo gateway autorizzato
         require(trustedGateway[msg.sender], "Untrusted gateway");
@@ -189,6 +156,7 @@ contract MedChainRegistry {
         require(timestamp > 0, "Invalid timestamp");
         require(hashCiphertext != bytes32(0), "Invalid hash");
         require(offchainRef > 0, "Invalid offchainRef");
+        require(gatewaySigHash != bytes32(0), "Invalid gatewaySigHash"); // ✅
 
         // 3) Anti-replay: stesso hash non può essere registrato due volte
         require(!usedHash[hashCiphertext], "Duplicate report");
@@ -203,10 +171,11 @@ contract MedChainRegistry {
             hashCiphertext: hashCiphertext,
             offchainRef: offchainRef,
             patient: patient,
-            submittedBy: msg.sender
+            submittedBy: msg.sender,
+            gatewaySigHash: gatewaySigHash
         });
 
-        // 5) Evento per indicare che il report è stato registrato
+        // 5) Evento
         emit ReportRegistered(
             reportsCount,
             patient,
@@ -214,7 +183,8 @@ contract MedChainRegistry {
             timestamp,
             hashCiphertext,
             offchainRef,
-            msg.sender
+            msg.sender,
+            gatewaySigHash
         );
 
         return reportsCount;
@@ -223,13 +193,6 @@ contract MedChainRegistry {
     // =========================
     // READ (senza audit)
     // =========================
-
-    /**
-     * getReport:
-     * - è view: non costa gas
-     * - NON può emettere evento di audit
-     * - accesso consentito a paziente o medico autorizzato
-     */
     function getReport(uint256 reportId)
         external
         view
@@ -239,7 +202,8 @@ contract MedChainRegistry {
             uint256 timestamp,
             bytes32 hashCiphertext,
             uint256 offchainRef,
-            address submittedBy
+            address submittedBy,
+            bytes32 gatewaySigHash // ✅ NUOVO
         )
     {
         Report storage r = reports[reportId];
@@ -248,19 +212,20 @@ contract MedChainRegistry {
         bool canRead = (msg.sender == r.patient) || isDoctorAllowed[r.patient][msg.sender];
         require(canRead, "Not authorized");
 
-        return (r.patient, r.deviceIdHash, r.timestamp, r.hashCiphertext, r.offchainRef, r.submittedBy);
+        return (
+            r.patient,
+            r.deviceIdHash,
+            r.timestamp,
+            r.hashCiphertext,
+            r.offchainRef,
+            r.submittedBy,
+            r.gatewaySigHash
+        );
     }
 
     // =========================
     // READ (con audit)
     // =========================
-
-    /**
-     * accessReport:
-     * - NON è view: costa gas
-     * - emette ReportAccessed per audit trail
-     * - restituisce gli stessi dati di getReport
-     */
     function accessReport(uint256 reportId)
         external
         returns (
@@ -269,7 +234,8 @@ contract MedChainRegistry {
             uint256 timestamp,
             bytes32 hashCiphertext,
             uint256 offchainRef,
-            address submittedBy
+            address submittedBy,
+            bytes32 gatewaySigHash // ✅ NUOVO
         )
     {
         Report storage r = reports[reportId];
@@ -280,8 +246,14 @@ contract MedChainRegistry {
 
         emit ReportAccessed(reportId, msg.sender);
 
-        return (r.patient, r.deviceIdHash, r.timestamp, r.hashCiphertext, r.offchainRef, r.submittedBy);
+        return (
+            r.patient,
+            r.deviceIdHash,
+            r.timestamp,
+            r.hashCiphertext,
+            r.offchainRef,
+            r.submittedBy,
+            r.gatewaySigHash
+        );
     }
 }
-
-
