@@ -1,141 +1,78 @@
 # 🩺 MedChain IoT
 
-**MedChain IoT** è un sistema di monitoraggio medico basato su **IoT e Blockchain** che consente la raccolta, la protezione e la verifica dei dati clinici dei pazienti, garantendo **integrità, autenticità e confidenzialità** delle informazioni sanitarie.
+**MedChain IoT** è un sistema di monitoraggio medico basato su **IoT, crittografia avanzata e Blockchain**, progettato per garantire **integrità, autenticità, confidenzialità e tracciabilità** dei dati clinici raccolti da dispositivi IoT.
 
-Il progetto utilizza dispositivi IoT (ESP32 / Arduino con sensori medici) per la misurazione dei parametri vitali e una blockchain per certificare l’origine e l’immutabilità dei dati, senza memorizzare informazioni sensibili on-chain.
+Il sistema separa in modo netto:
+- **dati sensibili** → cifrati e conservati **off-chain**
+- **prove crittografiche** → registrate **on-chain**
 
------
-## 📖 Descrizione del progetto 
-Medchain IOT nasce con l'obiettivo di risolvere uno dei principali problemi della sanità digitale: 
-** la fiducia nei dati clinici raccolti da dispositivi IOT **.
+In questo modo la blockchain certifica i dati **senza mai memorizzare informazioni sanitarie in chiaro**.
+
+---
+
+## 📖 Descrizione del progetto
+
+MedChain IoT nasce per affrontare uno dei problemi centrali della sanità digitale:
+
+> **Come fidarsi dei dati clinici generati da dispositivi IoT?**
+
+Il progetto garantisce che:
+- i dati provengano da un dispositivo autentico
+- i dati non possano essere alterati
+- ogni report sia verificabile nel tempo
+- la privacy del paziente sia sempre preservata
+
+---
+
+## 🎯 Obiettivi principali
 
 Il sistema permette di:
--raccogliere parametri medici in tempi reale
--impedisce la falsificazione dei dati 
--garantire che ogni dato provenga da un dispositivo autorizzato 
--consentire al paziente di controllare l'accesso ai propri dati 
--verificare l'integrità dei report tramite blockchain
 
-i dati clinici ** non vengono mai salvati in chiaro sulla blockchain**, ma vengono cifrati e archiviati off-chain, mentre la blockchain conserva solo metadati certificati
+- raccogliere parametri vitali in tempo reale  
+- prevenire spoofing e falsificazione dei dati  
+- autenticare crittograficamente i dispositivi IoT  
+- proteggere i dati clinici con cifratura forte  
+- certificare l’integrità dei report tramite blockchain  
+- consentire al paziente il controllo degli accessi  
 
-----
-## Tecnologie Utilizzate
-### Hardware : 
--Esp32
-### Software:
--comunicazione: HTTPS
--Crittografia: 
-    -AES-256-GCM (simmetrica)
--Hashing: SHA-256
--Firma digitale: chiavi crittografiche del dispositivo 
-
-### Blockchain:
--Smart Contract per: 
-    - verifica firme digitali
-    - registrazione dei metadati 
-    - gestione degli accessi medico paziente
--Storage off-chian
-
-----
-
-## Architettura e Funzionamento 
-
-### 1 Raccolta dei dati medici (IOT):
-il dispositivo IOT rileva in tempo reale:
--battito cardiaco
--ossigenazione (Sp02)
-
-ad ogni misurazione include:
--timestamp locale
-- identificativo del dispositivo (deviceID)
-
----
-### 2 Autenticità e origine del dato:
-Per evitare manomissioni o spoofing:
--il dispositivo genera un timestamp
--firma i dati grezzi (o il loro hash)
--invia i dati al gateway tramite connessione sicura (TLS)
-
---- 
-### 3 Cifratura dei dati (Gateway)
-Il gateway riceve i dati e applica cifratura forte per garantire la confidenzialità:
-
-dati_cifrati = Encrypt(chiave_medico/paziente, dati)
-
-Possibili approcci:
--cifratura simmetrica (AES-256-GCM)
--cifratura asimmetrica (ECC/ RSA con chiave del medico)
-
----
-### 4 Firma digitale finale del report 
-Dopo la cifratura:
-1. viene calcolato l'hash dei dati cifrati 
-2. viene generata la firma digitale finale
-
-hash= SHA-256(dati_cifrati)
-firma=Sign(chiave_privata_device, hash)
-
-Garantire che il dato non sia stato modificato dopo la cifratura
-La Blockchain potrà verificarne l'autenticità
+📌 **Nessun dato clinico viene mai scritto in chiaro sulla blockchain.**
 
 ---
 
-## 🔗 Ruolo della Blockchain
+## 🧩 Tecnologie utilizzate
 
-### 📌 1. Memorizzazione di metadati non sensibili
-La blockchain registra esclusivamente:
-- hash dei dati cifrati
-- deviceID
-- timestamp
-- firma digitale
-- riferimento allo storage off-chain (es. IPFS hash)
+### 🔧 Hardware
+- Arduino R4 WiFi / ESP32  
+- Sensori medicali (battito cardiaco, SpO₂, temperatura)
 
----
+### 💻 Software & Sicurezza
+- **Comunicazione**: MQTT su TLS (MQTTS)
+- **Firma digitale**: Ed25519 (device e gateway)
+- **Cifratura dati**: AES-256-GCM
+- **Protezione chiavi**: RSA-OAEP (chiave del medico)
+- **Hashing**: SHA-256
+- **Anti-replay**: counter monotono + timestamp
 
-### 📌 2. Garanzia di integrità e autenticità
-Grazie a hash e firme digitali, è possibile verificare che:
-- il dato provenga da un dispositivo autorizzato
-- non sia stato alterato
-- sia stato registrato in uno specifico momento temporale
-
----
-
-### 📌 3. Gestione degli accessi (medico ↔ paziente)
-Lo smart contract implementa:
-- concessione e revoca dei permessi da parte del paziente
-- accesso controllato ai report cifrati
-- tracciamento degli accessi ai dati clinici
+### ⛓️ Blockchain
+- Smart contract Ethereum (Hardhat)
+- Registrazione di:
+  - hash dei dati cifrati
+  - deviceID (hashato)
+  - timestamp
+  - riferimento allo storage off-chain
+- Nessun dato sensibile on-chain
 
 ---
 
-### 📌 4. Verifica automatica delle firme digitali
-Lo smart contract conserva la chiave pubblica del dispositivo IoT e:
-1. verifica la firma digitale del report
-2. controlla la corrispondenza della chiave pubblica
-3. verifica il timestamp
-4. registra il report solo se valido
+## 🏗️ Architettura del sistema
 
---- 
-## One-time setup
-
-Dopo il deploy dello smart contract è necessario autorizzare
-i dispositivi IoT che possono inviare report.
-
-Eseguire una sola volta:
-
-```bash
-python blockchain_client.py
-
-
----
-
-### 🔹 Esecuzione normale
-
-```markdown
-## Run the system
-
-1. Avvia Hardhat node
-2. Avvia il gateway
-3. Avvia il dispositivo IoT (ESP32)
-
-Il gateway invierà automaticamente i report on-chain.
+```text
+[ IoT Device ]
+     |
+     |  (Ed25519 + TLS)
+     v
+[ Gateway Sicuro ]
+     |
+     |  (AES-GCM + RSA)
+     v
+[ Storage Off-chain ] -----> [ Blockchain ]
