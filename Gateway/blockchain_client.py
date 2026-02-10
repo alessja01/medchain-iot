@@ -12,9 +12,16 @@ PRIVATE_KEY = os.getenv(
 
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3")
 
-ABI_PATH = os.getenv(
-    "ABI_PATH",
-    "/Users/alessia/medchain/Blockchain/artifacts/contracts/MedChainRegistry.sol/MedChainRegistry.json"
+# Trova automaticamente la cartella del progetto senza usare nomi utente fissi
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ABI_PATH = os.path.join(
+    current_dir, 
+    "..", 
+    "Blockchain", 
+    "artifacts", 
+    "contracts", 
+    "MedChainRegistry.sol", 
+    "MedChainRegistry.json"
 )
 
 DEFAULT_PATIENT = os.getenv("DEFAULT_PATIENT", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")

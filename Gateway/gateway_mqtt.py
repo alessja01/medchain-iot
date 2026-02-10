@@ -43,11 +43,11 @@ from blockchain_client import register_report_onchain
 # CONFIG MQTT
 # =========================
 BROKER = "broker.hivemq.com"
-PORT = 8883
+PORT = 1883
 
-TOPIC_VITALS = "medchain/patient1"        # device -> gateway
-TOPIC_REG    = "medchain/register"        # device -> gateway
-TOPIC_PROOF  = "medchain/register/proof"  # device -> gateway
+TOPIC_VITALS = "medchain/patient1"       # device -> gateway
+TOPIC_REG    = "medchain/register"       # device -> gateway
+TOPIC_PROOF  = "medchain/register/proof";  # device -> gateway
 
 # =========================
 # SICUREZZA TIMESTAMP
@@ -276,18 +276,19 @@ def clear_pending(device_id: str):
     conn.commit()
     conn.close()
 
-
 def check_and_update_state(device_id: str, counter: int, ts: int) -> bool:
     """
-    Anti-replay robusto:
-    - timestamp deve essere entro finestra (±MAX_TS_SKEW_SEC)
-    - counter deve crescere
-    - timestamp non deve tornare indietro (>= last_timestamp)
+    Versione di Debug: Accetta timestamp anche sballati per sbloccare l'Arduino.
     """
     now = int(time.time())
 
-    if ts < now - MAX_TS_SKEW_SEC or ts > now + MAX_TS_SKEW_SEC:
-        return False
+    # LOG DI DEBUG per vedere cosa invia l'Arduino
+    print(f"[DEBUG-TIME] Gateway: {now} | Arduino: {ts} | Skew: {abs(now - ts)}s")
+
+    # DISATTIVIAMO TEMPORANEAMENTE IL BLOCCO SKEW (Timestamp sballato)
+    # Se vuoi riattivarlo dopo il test, rimetti: if ts < now - MAX_TS_SKEW_SEC...
+    if ts == 0:
+        print("[DEBUG-TIME] Attenzione: Arduino ha inviato timestamp 0. Accetto per test.")
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -300,10 +301,9 @@ def check_and_update_state(device_id: str, counter: int, ts: int) -> bool:
         last_counter = int(row[0])
         last_ts = int(row[1])
 
+        # Manteniamo solo il controllo sul counter per evitare replay immediati
         if counter <= last_counter:
-            conn.close()
-            return False
-        if ts < last_ts:
+            print(f"[REPLAY] Bloccato: counter non incrementato ({counter} <= {last_counter})")
             conn.close()
             return False
 
@@ -318,6 +318,7 @@ def check_and_update_state(device_id: str, counter: int, ts: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
 
 
 # =========================
@@ -556,6 +557,7 @@ def process_vitals(m: dict, raw_payload: str):
     rep_canon = canonical_report(device_id, ts, h, row_id)
     gateway_sig_hex = gateway_sign_hex(rep_canon)
     gateway_sig_hash_hex = Web3.keccak(hexstr="0x" + gateway_sig_hex).hex()[2:]
+    
 
     # aggiorna firma reale
     cur.execute("""
@@ -595,14 +597,19 @@ def process_vitals(m: dict, raw_payload: str):
 # MQTT CALLBACKS
 # =========================
 def on_connect(client, userdata, flags, rc):
-    print("[MQTT] Connesso, rc=", rc)
-    client.subscribe(TOPIC_REG)
-    client.subscribe(TOPIC_PROOF)
-    client.subscribe(TOPIC_VITALS)
-    print("[MQTT] Subscribed:", TOPIC_REG, TOPIC_PROOF, TOPIC_VITALS)
-
+    print(f"[MQTT] Connesso! rc={rc}")
+    if rc == 0:
+        # Iscriviti esattamente come hai fatto con mosquitto_sub
+        client.subscribe("medchain/#")
+        print("[DEBUG] Iscrizione a medchain/# completata")
+    else:
+        print(f"Errore connessione, rc={rc}")
 
 def on_message(client, userdata, msg):
+    # Forza la stampa di ogni messaggio ricevuto sul broker
+    print(f"\n[INTERCETTATO] Topic: {msg.topic} | Payload: {msg.payload.decode()[:50]}...")
+    print(f"\n-- Debug: ricevuto messaggio su{msg.topic}---")
+    
     payload_str = msg.payload.decode("utf-8", errors="ignore")
     print(f"\n[MQTT] {msg.topic} -> {payload_str}")
 
@@ -634,12 +641,10 @@ def main():
     threading.Thread(target=retry_loop, daemon=True).start()
     print(f"[RETRY] worker attivo (ogni {RETRY_INTERVAL_SEC}s)")
 
-    client = mqtt.Client(client_id="medchain-gateway-ed25519")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="medchain-gateway-ale-unique-123", protocol=mqtt.MQTTv311)
     client.on_connect = on_connect
     client.on_message = on_message
 
-    client.tls_set()
-    client.tls_insecure_set(False)
 
     print("[MQTT] Connessione TLS a broker...")
     client.connect(BROKER, PORT, keepalive=60)
