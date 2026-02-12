@@ -1,0 +1,3 @@
+#pragma once
+#define DEVICE_ID "R4-I0T-001-XYZ99"
+#define GATEWAY_PUBKEY_HEX "8580d9d154496d87aee218549d0d9f7ce5ba90c943624fbcc10cecbd40714dcb"

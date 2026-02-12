@@ -1,9 +1,6 @@
-/***************************************************************
-  MEDCHAIN MONITOR ULTIMATE – Arduino UNO R4 WiFi
-  - Connessione TLS (Porta 8883)
-  - Firma Ed25519 (Integrata alla sorgente)
-  - Auto-Retry Provisioning & Time Fallback
-***************************************************************/
+
+#include "secret.h"
+#include "device_key.h"
 
 #include <Arduino.h>
 #include <WiFiS3.h>
@@ -25,28 +22,32 @@
 #include <Ed25519.h>
 
 // ====== CONFIGURAZIONE ======
-const char* ssid     = "Vodafone5GHz-Wifi6";
-const char* password = "Suanalar@1977!Suanalar@1977!";
-const char* mqtt_server = "broker.hivemq.com";
-const int mqtt_port  = 8883; // Porta TLS
+const char* ssid     = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
+const char* mqtt_server = MQTT_SERVER;
+const int mqtt_port  = MQTT_PORT; // Porta TLS
 
-const char* deviceId = "R4-I0T-001-XYZ99";
+const char* deviceId = DEVICE_ID;
+
 const char* mqtt_topic_data   = "medchain/patient1";
 const char* mqtt_topic_reg    = "medchain/register";
 const char* mqtt_topic_proof  = "medchain/register/proof";
 const char* mqtt_topic_status = "medchain/status/patient1";
 
-String challengeTopic = String("medchain/challenge/") + deviceId;
-String ackTopic       = String("medchain/register/ack/") + deviceId;
+String challengeTopic;
+String ackTopic;
+
+// ===== EEPROM LAYOUT =====
+const uint32_t EEPROM_MAGIC_VALUE = 0x4D43484E; // "MCHN"
+const int EEPROM_ADDR_MAGIC   = 0;             // 4 bytes
+const int EEPROM_ADDR_COUNTER = 4;             // 4 bytes (uint32_t)
+const int EEPROM_ADDR_PRIVKEY = 8;             // 32 bytes
+
 
 // ====== CHIAVI ED25519 ======
-static const uint8_t DEVICE_PRIVKEY[32] = {
-  0x4f,0x8c,0x4e,0x46,0x17,0x71,0x59,0x78,0x7b,0x43,0x4e,0xaf,
-  0x07,0x7f,0xce,0xdd,0xf9,0x7c,0x3f,0x7f,0x1c,0xb6,0x16,0x59,
-  0xac,0xc1,0xb9,0x06,0x26,0x80,0x8e,0xaa
-};
-static uint8_t DEVICE_PUBKEY[32];
-static const char* GATEWAY_PUBKEY_HEX = "8580d9d154496d87aee218549d0d9f7ce5ba90c943624fbcc10cecbd40714dcb";
+static uint8_t DEVICE_PRIVKEY[32];   // ora viene caricata/generata
+static uint8_t DEVICE_PUBKEY[32];    //derivata 
+
 
 // ====== STATO E SENSORI ======
 WiFiSSLClient net;
@@ -61,7 +62,60 @@ unsigned long lastPublish = 0;
 int beatAvg = 0;
 long lastBeat = 0;
 
+//Anti-replay ACK base
+String lastChallengeNonce="";
+bool waitingAck=false;
+
+//  ====== COUNTER ======
+void loadCounter() {
+  EEPROM.get(EEPROM_ADDR_COUNTER, counter);
+  if (counter == 0xFFFFFFFF) counter = 0;
+  Serial.print("[CTR] counter iniziale=");
+  Serial.println(counter);
+}
+
+void saveCounter() {
+  EEPROM.put(EEPROM_ADDR_COUNTER, counter);
+}
+
+//====== RNG ======
+void seedRng() {
+  randomSeed((unsigned long)micros() ^ (unsigned long)millis());
+}
+
+void fillRandom(uint8_t* out, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    out[i] = (uint8_t)random(0, 256);
+  }
+}
+
+
+// ====== KEY per device in EEPROM ======
+void loadOrCreateDeviceKey() {
+  uint32_t magic = 0;
+  EEPROM.get(EEPROM_ADDR_MAGIC, magic);
+
+  if (magic == EEPROM_MAGIC_VALUE) {
+    for (int i = 0; i < 32; i++) {
+      DEVICE_PRIVKEY[i] = EEPROM.read(EEPROM_ADDR_PRIVKEY + i);
+    }
+    Serial.println("[KEY] PrivKey caricata da EEPROM ");
+  } else {
+    seedRng();
+    fillRandom(DEVICE_PRIVKEY, 32);
+
+    EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC_VALUE);
+    for (int i = 0; i < 32; i++) {
+      EEPROM.write(EEPROM_ADDR_PRIVKEY + i, DEVICE_PRIVKEY[i]);
+    }
+    Serial.println("[KEY] PrivKey generata e salvata in EEPROM ");
+  }
+
+  Ed25519::derivePublicKey(DEVICE_PUBKEY, DEVICE_PRIVKEY);
+}
+
 // ====== UTILS HEX & CRYPTO ======
+
 String toHex(const uint8_t* data, size_t len) {
   const char hexmap[] = "0123456789abcdef";
   String s = "";
@@ -73,13 +127,29 @@ String toHex(const uint8_t* data, size_t len) {
 }
 
 bool fromHex(const String& hex, uint8_t* out, size_t outLen) {
+  if (hex.length() < (int)(outLen * 2)) return false;
   for (size_t i = 0; i < outLen; i++) {
     char c1 = hex[i*2], c2 = hex[i*2+1];
-    auto hv = [](char c) { return (c>='0'&&c<='9')?c-'0':(c>='a'&&c<='f')?c-'a'+10:c-'A'+10; };
+    auto hv = [](char c) {
+      return (c>='0'&&c<='9') ? (c-'0') :
+             (c>='a'&&c<='f') ? (c-'a'+10) :
+             (c>='A'&&c<='F') ? (c-'A'+10) : 0;
+    };
     out[i] = (hv(c1) << 4) | hv(c2);
   }
   return true;
 }
+
+bool isHexLen(const String& s, size_t len) {
+  if (s.length() != (int)len) return false;
+  for (size_t i = 0; i < len; i++) {
+    char c = s[i];
+    bool ok = (c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F');
+    if (!ok) return false;
+  }
+  return true;
+}
+
 
 String signHex(const String& canonical) {
   uint8_t sig[64];
@@ -88,20 +158,34 @@ String signHex(const String& canonical) {
 }
 
 bool verifyHex(const String& pubKeyHex, const String& canonical, const String& sigHex) {
+  if (!isHexLen(pubKeyHex, 64) || !isHexLen(sigHex, 128)) return false;
   uint8_t pub[32], sig[64];
-  fromHex(pubKeyHex, pub, 32); fromHex(sigHex, sig, 64);
-  return Ed25519::verify(sig, pub, (const uint8_t*)canonical.c_str(), canonical.length());
+  if (!fromHex(pubKeyHex, pub, 32)) return false;
+  if (!fromHex(sigHex, sig, 64)) return false;
+  return Ed25519::verify(sig, pub,
+                         (const uint8_t*)canonical.c_str(), canonical.length());
+}
+// ==== STRICT TIME =====
+bool timeReady() {
+  unsigned long t = WiFi.getTime();
+  return t > 1700000000UL;
 }
 
-unsigned long getEpochSafe() {
-  unsigned long t = WiFi.getTime();
-  return (t == 0) ? 1770880000 : t; // Fallback se NTP non pronto
+unsigned long getEpochStrict() {
+  return WiFi.getTime();
 }
 
 // ====== FUNZIONI DI INVIO ======
 void sendRegister() {
-  unsigned long ts = getEpochSafe();
+  if(!timeReady()){
+    Serial.println("[TIME] Ora non valida: REGISTER non inviato");
+    return;
+  }
+
+  unsigned long ts = getEpochStrict();
   counter++;
+  saveCounter();
+
   String pk = toHex(DEVICE_PUBKEY, 32);
   String canon = "REGISTER|" + String(deviceId) + "|" + String(ts) + "|" + String(counter) + "|" + pk;
   
@@ -120,8 +204,21 @@ void sendRegister() {
 }
 
 void sendProof(const String& nonce) {
-  unsigned long ts = getEpochSafe();
+
+  if(!timeReady()){
+    Serial.println("[TIME] Ora non valida: PROOF non inviato");
+    return;
+  }
+
+  if(!isHexLen(nonce,32)){
+    Serial.println("[MQTT]: PROOF nonce invalido");
+    return;
+  }
+
+  unsigned long ts=getEpochStrict();
   counter++;
+  saveCounter();
+
   String canon = "PROOF|" + String(deviceId) + "|" + nonce + "|" + String(ts) + "|" + String(counter);
   
   StaticJsonDocument<512> doc;
@@ -141,37 +238,64 @@ void sendProof(const String& nonce) {
 // ====== CALLBACK MQTT ======
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   StaticJsonDocument<512> doc;
-  deserializeJson(doc, payload, length);
-  String type = doc["type"] | "";
+  DeserializationError err = deserializeJson(doc, payload, length);
+  if (err) {
+    Serial.print("[MQTT] JSON err: ");
+    Serial.println(err.c_str());
+    return;
+  }
+
+  String type=doc["type"] | "";
 
   if (type == "CHALLENGE") {
     String nonce = doc["nonce"] | "";
+    if(!isHexLen(nonce,32)){
+      Serial.println("[MQTT] CHALLENGE nonce invalido -> scarto");
+      return;
+    }
+
     Serial.println("[MQTT] Ricevuta CHALLENGE");
+    lastChallengeNonce=nonce;
+    waitingAck=true;
     sendProof(nonce);
+
   } 
   else if (type == "ACK") {
     String status = doc["status"] | "";
     String sig = doc["sig"] | "";
     String nonce = doc["nonce"] | "";
-    unsigned long ts = doc["timestamp"];
+    unsigned long ts = doc["timestamp"] | 0UL;
+
+    if (!waitingAck) {
+      Serial.println("[MQTT] ACK inatteso -> scarto");
+      return;
+    }
+    if (!isHexLen(sig, 128) || !isHexLen(nonce, 32) || ts == 0) {
+      Serial.println("[MQTT] ACK campi invalidi -> scarto");
+      return;
+    }
+    if (nonce != lastChallengeNonce) {
+      Serial.println("[MQTT] ACK nonce mismatch (replay?) -> scarto");
+      return;
+    }
     
     String canon = "ACK|" + String(deviceId) + "|" + String(ts) + "|" + status + "|" + nonce;
     if (verifyHex(GATEWAY_PUBKEY_HEX, canon, sig) && status == "OK") {
       provisioned = true;
-      Serial.println("[MQTT] Provisioning COMPLETATO ✅");
+      Serial.println("[MQTT] Provisioning COMPLETATO ");
     }
   }
 }
 
+// ====== CONNECT MQTT ======
 void connectMQTT() {
   while (!client.connected()) {
     Serial.println("\n--- DIAGNOSTICA CONNESSIONE ---");
     
-    // 1. RAM e WiFi OK (saltiamo i log per brevità, sappiamo che vanno)
     
     // 2. Test Handshake SSL
     if (net.connect(mqtt_server, mqtt_port)) {
-      Serial.println("Handshake SSL riuscito! ✅");
+      Serial.println("Handshake SSL riuscito! ");
       net.stop(); 
       
       // 3. Generiamo un ID più corto e semplice (max 23 caratteri)
@@ -184,7 +308,7 @@ void connectMQTT() {
       // 4. Connessione SEMPLIFICATA (senza Last Will e senza parametri extra)
       // Se il broker pubblico è congestionato, questo è il modo più probabile per entrare
       if (client.connect(shortId.c_str())) { 
-        Serial.println("CONNESSO FINALMENTE! ✅✅");
+        Serial.println("CONNESSO FINALMENTE!");
         
         client.subscribe(challengeTopic.c_str());
         client.subscribe(ackTopic.c_str());
@@ -226,22 +350,29 @@ void setup() {
   }
   Serial.println("\nWiFi OK.");
 
-  // 3. ASPETTA SINCRONIZZAZIONE ORA (Vitale per SSL)
+  // 3. ASPETTA SINCRONIZZAZIONE ORA (Vitale per TLS e anti replay)
   Serial.print("Sincronizzazione ora NTP...");
   unsigned long startWait = millis();
-  while (WiFi.getTime() == 0 && millis() - startWait < 10000) {
+  while (WiFi.getTime() == 0 && millis() - startWait < 15000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println(WiFi.getTime() != 0 ? " Sincronizzato! ✅" : " Fallito (uso fallback) ⚠️");
+  Serial.println(WiFi.getTime() != 0 ? " Sincronizzato! " : " Fallito (uso fallback) ");
 
-  // 4. Configura Client
+  // 4. Carica counter e chiave device
+  loadCounter();
+  loadOrCreateDeviceKey();
+
+  //5. Topic dipendenti dal deviceId
+  challengeTopic=String("medchain/challenge/")+ deviceId;
+  ackTopic= String("medchain/register/ack/")+ deviceId;
+
+  //6. Configura MQTT
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(onMqttMessage);
   client.setBufferSize(1024);
   client.setKeepAlive(60);
   
-  Ed25519::derivePublicKey(DEVICE_PUBKEY, DEVICE_PRIVKEY);
   connectMQTT();
 }
 
@@ -273,13 +404,21 @@ void loop() {
 
   if (millis() - lastPublish > 5000) {
     lastPublish = millis();
+
+    if(!timeReady()){
+      Serial.println("[TIME] Ora non valide: VITALS skip");
+      return;
+    }
+
+
     float temp = tempSensor.getTemperature();
     int hr = (irValue > 50000) ? beatAvg : 0;
     int spo2 = (hr > 0) ? 98 : 0;
     int tempCenti = (int)(temp * 100);
-    unsigned long ts = getEpochSafe();
-    counter++;
-    EEPROM.put(0, counter);
+    unsigned long ts = getEpochStrict();
+  
+    counter ++;
+    saveCounter();
 
     String canon = "VITALS|" + String(deviceId) + "|" + String(ts) + "|" + String(counter) + "|" + String(hr) + "|" + String(spo2) + "|" + String(tempCenti);
     
