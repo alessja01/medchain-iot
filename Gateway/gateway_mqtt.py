@@ -510,7 +510,9 @@ def process_vitals(m: dict, raw_payload: str):
     # --- CIFRATURA ---
     plaintext = raw_payload.encode("utf-8")
     data_key = os.urandom(32)
+    #Cifra i dati con AES
     nonce, ciphertext, tag = encrypt_aes_gcm_256(plaintext, data_key)
+    #Cifra la chiave 
     enc_key = encrypt_key_for_doctor(data_key, "doctor_public.pem")
     h = hash_sha256(nonce + ciphertext + tag)
 
