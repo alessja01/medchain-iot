@@ -51,8 +51,17 @@ def ensure_bytes32(hex_hash: str) -> bytes:
 
 
 def _send_tx(w3, signed):
-    raw = getattr(signed, "raw_transaction", signed.rawTransaction)
+    # Gestisce le differenze tra le versioni di Web3.py (rawTransaction vs raw_transaction)
+    if hasattr(signed, "raw_transaction"):
+        raw = signed.raw_transaction
+    elif hasattr(signed, "rawTransaction"):
+        raw = signed.rawTransaction
+    else:
+        # Caso estremo: se l'oggetto è già in bytes
+        raw = signed
+        
     tx_hash = w3.eth.send_raw_transaction(raw)
+    # Aspetta che la transazione venga confermata nel blocco
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
     return receipt
 

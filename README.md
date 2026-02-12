@@ -76,3 +76,12 @@ Il sistema permette di:
      |  (AES-GCM + RSA)
      v
 [ Storage Off-chain ] -----> [ Blockchain ]
+
+
+---
+
+## Cose da modificare
+ comunicazione non è 8883
+ timestamp inizializzato a cazzo e non dev'essere così 
+ ho tolto tanti controlli in on_connect di gateway da rimettere
+ 

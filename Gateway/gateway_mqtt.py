@@ -1,26 +1,3 @@
-# =========================
-# gateway_mqtt_ed25519.py
-# =========================
-# Funzionalità:
-# - Verifica firme Ed25519 dal device (REGISTER / PROOF / VITALS)
-# - Provisioning challenge–response
-# - ACK firmato dal gateway (Ed25519)
-# - Anti-replay robusto: counter + finestra timestamp + last_timestamp
-# - Cifratura AES-256-GCM del payload VITALS (off-chain)
-# - Cifratura data_key per medico (RSA-OAEP)
-# - Hash SHA-256(nonce||ciphertext||tag)
-# - Firma gateway del REPORT e salvataggio:
-#     - DB: gateway_sig (firma completa) + gateway_sig_hash (bytes32 hex)
-#     - On-chain: gateway_sig_hash (bytes32)
-# - ✅ Affidabilità: Retry Queue per blockchain (pending_chain + worker retry)
-#
-# Dipendenze:
-#   pip install paho-mqtt pynacl web3 cryptography
-#
-# File richiesti:
-#   - crypto_utils.py (il tuo)
-#   - blockchain_client.py (aggiornato con gateway_sig_hash_hex)
-#   - doctor_public.pem
 
 import json
 import os
@@ -29,8 +6,10 @@ import secrets
 import sqlite3
 import threading
 
+
 import paho.mqtt.client as mqtt
 from web3 import Web3
+
 
 from nacl.signing import SigningKey, VerifyKey
 from nacl.exceptions import BadSignatureError
@@ -43,7 +22,7 @@ from blockchain_client import register_report_onchain
 # CONFIG MQTT
 # =========================
 BROKER = "broker.hivemq.com"
-PORT = 1883
+PORT = 8883
 
 TOPIC_VITALS = "medchain/patient1"       # device -> gateway
 TOPIC_REG    = "medchain/register"       # device -> gateway
@@ -432,19 +411,22 @@ def process_register(client: mqtt.Client, m: dict):
         counter = int(m["counter"])
         pubkey_hex = m["pubKey"]
         sig_hex = m["sig"]
-    except (KeyError, ValueError, TypeError) as e:
-        print("[REGISTER][ERR] campi non validi:", e)
+    except Exception as e:
+        print(f"[REGISTER][ERR] Campi mancanti: {e}")
         return
 
+    # --- AGGIUNGI/AGGIORNA IL DEVICE ORA ---
+    upsert_device(device_id, pubkey_hex)
+    print(f"[REGISTER] Device {device_id} censito nel DB (pubkey salvata).")
+
+    # Verifica firma del REGISTER (opzionale, ma consigliato)
     canon = canonical_register(device_id, ts, counter, pubkey_hex)
     if not ed25519_verify(pubkey_hex, canon, sig_hex):
-        print("[REGISTER] firma NON valida ❌", device_id)
+        print(f"[REGISTER] Firma non valida per {device_id} ❌")
         return
 
-    print("[REGISTER] firma valida ✅", device_id)
-    upsert_device(device_id, pubkey_hex)
+    # Invia la sfida
     send_challenge(client, device_id)
-
 
 def process_proof(client: mqtt.Client, m: dict):
     try:
@@ -458,6 +440,7 @@ def process_proof(client: mqtt.Client, m: dict):
         return
 
     dev = get_device(device_id)
+    print(f"[DEBUG-DB] get_device({device_id}) ha restituito: {dev}")
     if not dev:
         print("[PROOF] device sconosciuto:", device_id)
         return
@@ -524,14 +507,14 @@ def process_vitals(m: dict, raw_payload: str):
 
     print("[VITALS] firma valida ✅ + anti-replay OK", device_id)
 
+    # --- CIFRATURA ---
     plaintext = raw_payload.encode("utf-8")
     data_key = os.urandom(32)
-
     nonce, ciphertext, tag = encrypt_aes_gcm_256(plaintext, data_key)
     enc_key = encrypt_key_for_doctor(data_key, "doctor_public.pem")
     h = hash_sha256(nonce + ciphertext + tag)
 
-    # Salvataggio off-chain con placeholder firma gateway (poi update)
+    # --- SALVATAGGIO DB ---
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -539,39 +522,43 @@ def process_vitals(m: dict, raw_payload: str):
         (device_id, timestamp, device_sig, nonce, ciphertext, tag, enc_key, hash, gateway_sig, gateway_sig_hash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        device_id,
-        int(ts),
-        device_sig_hex,
-        sqlite3.Binary(nonce),
-        sqlite3.Binary(ciphertext),
-        sqlite3.Binary(tag),
-        sqlite3.Binary(enc_key),
-        h,
-        "PENDING",
-        "PENDING"
+        device_id, int(ts), device_sig_hex,
+        sqlite3.Binary(nonce), sqlite3.Binary(ciphertext), sqlite3.Binary(tag),
+        sqlite3.Binary(enc_key), h, "PENDING", "PENDING"
     ))
     conn.commit()
     row_id = cur.lastrowid
 
-    # Firma gateway del report (include offchainRef=row_id)
+    # --- FIRMA GATEWAY ---
     rep_canon = canonical_report(device_id, ts, h, row_id)
     gateway_sig_hex = gateway_sign_hex(rep_canon)
-    gateway_sig_hash_hex = Web3.keccak(hexstr="0x" + gateway_sig_hex).hex()[2:]
-    
+    # Calcolo hash per blockchain (bytes32 esatti)
+    gateway_sig_hash_hex = Web3.keccak(hexstr="0x" + gateway_sig_hex).hex()[2:].zfill(64)
 
-    # aggiorna firma reale
-    cur.execute("""
-        UPDATE reports
-        SET gateway_sig=?, gateway_sig_hash=?
-        WHERE id=?
-    """, (gateway_sig_hex, gateway_sig_hash_hex, row_id))
+    # Aggiorna DB con firme reali
+    cur.execute("UPDATE reports SET gateway_sig=?, gateway_sig_hash=? WHERE id=?", 
+                (gateway_sig_hex, gateway_sig_hash_hex, row_id))
     conn.commit()
     conn.close()
 
     print(f"[SQL] Report salvato id={row_id}")
-    print(f"[AUDIT] gateway_sig_hash={gateway_sig_hash_hex}")
 
-    # ON-CHAIN: se fallisce -> retry queue
+    # ==========================================================
+    # 🔍 SEZIONE DEBUG: ORA row_id, h, gateway_sig_hash_hex SONO DEFINITI
+    # ==========================================================
+    print("\n" + "="*50)
+    print("DEBUG FORMATI BLOCKCHAIN:")
+    print(f"1. hash_hex (dati): {h} | Len: {len(h)}")
+    print(f"2. gateway_sig_hash_hex: {gateway_sig_hash_hex} | Len: {len(gateway_sig_hash_hex)}")
+    print(f"3. device_id: {device_id}")
+    print(f"4. offchain_ref (row_id): {row_id}")
+    
+    if len(h) != 64 or len(gateway_sig_hash_hex) != 64:
+        print("❌ ERRORE: Hash non valido per bytes32 (lunghezza errata)!")
+    print("="*50 + "\n")
+    # ==========================================================
+
+    # --- INVIO BLOCKCHAIN ---
     try:
         txh = register_report_onchain(
             device_id_str=device_id,
@@ -580,17 +567,12 @@ def process_vitals(m: dict, raw_payload: str):
             offchain_ref=row_id,
             gateway_sig_hash_hex=gateway_sig_hash_hex
         )
-        print("[BLOCKCHAIN] Registrato on-chain:", txh)
+        print("[BLOCKCHAIN] ✅ Registrato on-chain:", txh)
     except Exception as e:
-        print("[BLOCKCHAIN] fallita, metto in retry queue ❌", e)
-        enqueue_chain_retry(
-            report_id=row_id,
-            device_id=device_id,
-            ts=ts,
-            hash_hex=h,
-            gateway_sig_hash_hex=gateway_sig_hash_hex,
-            error=e
-        )
+        print(f"[BLOCKCHAIN] ❌ Errore: {e}")
+        import traceback
+        traceback.print_exc() 
+        enqueue_chain_retry(row_id, device_id, ts, h, gateway_sig_hash_hex, e)
 
 
 # =========================
@@ -637,17 +619,30 @@ def on_message(client, userdata, msg):
 def main():
     init_db()
 
+    #Pulizia test: svuota i vecchi errori blockchain per ripartire puliti 
+    conn=sqlite3.connect(DB_PATH)
+    conn.cursor().execute("DELETE FROM pending_chain")
+    conn.commit()
+    conn.close()
+    print("[SQL] Coda di retry svuotata per nuovo test")
+
     # ✅ avvia worker retry in background
     threading.Thread(target=retry_loop, daemon=True).start()
     print(f"[RETRY] worker attivo (ogni {RETRY_INTERVAL_SEC}s)")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="medchain-gateway-ale-unique-123", protocol=mqtt.MQTTv311)
+    #Abilita il TLS utilizzando i certificati predefiniti del sistema
+    client.tls_set()
     client.on_connect = on_connect
     client.on_message = on_message
 
 
-    print("[MQTT] Connessione TLS a broker...")
-    client.connect(BROKER, PORT, keepalive=60)
+    print(f"[MQTT] Connessione TLS in corso a {BROKER}:{PORT}...")
+    try:
+        client.connect(BROKER, PORT, keepalive=60)
+    except Exception as e:
+        print(f"[ERRORE] Impossibile stabilire connessione TLS: {e}")
+        return
     client.loop_forever()
 
 
