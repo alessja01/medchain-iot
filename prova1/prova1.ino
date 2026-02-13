@@ -39,10 +39,9 @@ String ackTopic;
 
 // ===== EEPROM LAYOUT =====
 const uint32_t EEPROM_MAGIC_VALUE = 0x4D43484E; // "MCHN"
-const int EEPROM_ADDR_MAGIC   = 0;             // 4 bytes
-const int EEPROM_ADDR_COUNTER = 4;             // 4 bytes (uint32_t)
-const int EEPROM_ADDR_PRIVKEY = 8;             // 32 bytes
-
+const int EEPROM_ADDR_MAGIC   = 0;             // 4 bytes (indirizzo partenza)
+const int EEPROM_ADDR_COUNTER = 4;             // 4 bytes (counter anti-replay non riparti da 1 dal counter precedente +1)
+const int EEPROM_ADDR_PRIVKEY = 8;             // 32 bytes (indirizzo chiave privata)
 
 // ====== CHIAVI ED25519 ======
 static uint8_t DEVICE_PRIVKEY[32];   // ora viene caricata/generata
