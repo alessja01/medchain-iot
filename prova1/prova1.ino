@@ -298,14 +298,12 @@ void connectMQTT() {
       net.stop(); 
       
       // 3. Generiamo un ID più corto e semplice (max 23 caratteri)
-      // Esempio: R4ALE7764 (senza troppi trattini)
       String shortId = "R4ALE" + String(millis()).substring(0, 5);
       
       Serial.print("Tentativo MQTT con ID: ");
       Serial.println(shortId);
 
-      // 4. Connessione SEMPLIFICATA (senza Last Will e senza parametri extra)
-      // Se il broker pubblico è congestionato, questo è il modo più probabile per entrare
+      // 4. Connessione SEMPLIFICATA
       if (client.connect(shortId.c_str())) { 
         Serial.println("CONNESSO FINALMENTE!");
         

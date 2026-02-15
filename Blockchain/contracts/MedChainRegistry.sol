@@ -47,7 +47,7 @@ contract MedChainRegistry {
         address patient;
         address submittedBy;
 
-        // ✅ NUOVO: hash della firma del gateway sul canonical REPORT
+        // Hash della firma del gateway sul canonical REPORT
         // (es. keccak256(signatureEd25519HexBytes))
         bytes32 gatewaySigHash;
     }
@@ -66,7 +66,7 @@ contract MedChainRegistry {
         bytes32 hashCiphertext,
         uint256 offchainRef,
         address submittedBy,
-        bytes32 gatewaySigHash // ✅ NUOVO
+        bytes32 gatewaySigHash
     );
 
     event ReportAccessed(uint256 indexed reportId, address indexed accessor);
@@ -144,7 +144,7 @@ contract MedChainRegistry {
         uint256 timestamp,
         bytes32 hashCiphertext,
         uint256 offchainRef,
-        bytes32 gatewaySigHash // ✅ NUOVO parametro
+        bytes32 gatewaySigHash
     ) external returns (uint256) {
         // 1) Solo gateway autorizzato
         require(trustedGateway[msg.sender], "Untrusted gateway");
@@ -156,7 +156,7 @@ contract MedChainRegistry {
         require(timestamp > 0, "Invalid timestamp");
         require(hashCiphertext != bytes32(0), "Invalid hash");
         require(offchainRef > 0, "Invalid offchainRef");
-        require(gatewaySigHash != bytes32(0), "Invalid gatewaySigHash"); // ✅
+        require(gatewaySigHash != bytes32(0), "Invalid gatewaySigHash");
 
         // 3) Anti-replay: stesso hash non può essere registrato due volte
         require(!usedHash[hashCiphertext], "Duplicate report");
@@ -203,7 +203,7 @@ contract MedChainRegistry {
             bytes32 hashCiphertext,
             uint256 offchainRef,
             address submittedBy,
-            bytes32 gatewaySigHash // ✅ NUOVO
+            bytes32 gatewaySigHash
         )
     {
         Report storage r = reports[reportId];
@@ -235,7 +235,7 @@ contract MedChainRegistry {
             bytes32 hashCiphertext,
             uint256 offchainRef,
             address submittedBy,
-            bytes32 gatewaySigHash // ✅ NUOVO
+            bytes32 gatewaySigHash
         )
     {
         Report storage r = reports[reportId];

@@ -71,7 +71,7 @@ def canonical_ack(device_id: str, ts: int, status: str, nonce_hex: str) -> str:
 def canonical_vitals(device_id: str, ts: int, counter: int, hr: int, spo2: int, temp_centi: int) -> str:
     return f"VITALS|{device_id}|{ts}|{counter}|{hr}|{spo2}|{temp_centi}"
 
-# ✅ Firma gateway su report cifrato (audit/non-ripudio)
+# Firma gateway su report cifrato (audit/non-ripudio)
 def canonical_report(device_id: str, ts: int, hash_hex: str, offchain_ref: int) -> str:
     return f"REPORT|{device_id}|{ts}|{hash_hex}|{offchain_ref}"
 
@@ -130,7 +130,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # ✅ REPORTS: tabella che nel tuo snippet mancava (ma la usi in INSERT)
+    # REPORTS
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,7 +151,7 @@ def init_db():
         );
     """)
 
-    # ✅ Retry queue blockchain
+    # Retry queue blockchain
     cur.execute("""
         CREATE TABLE IF NOT EXISTS pending_chain (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,8 +264,6 @@ def check_and_update_state(device_id: str, counter: int, ts: int) -> bool:
     # LOG DI DEBUG per vedere cosa invia l'Arduino
     print(f"[DEBUG-TIME] Gateway: {now} | Arduino: {ts} | Skew: {abs(now - ts)}s")
 
-    # DISATTIVIAMO TEMPORANEAMENTE IL BLOCCO SKEW (Timestamp sballato)
-    # Se vuoi riattivarlo dopo il test, rimetti: if ts < now - MAX_TS_SKEW_SEC...
     if ts == 0:
         print("[DEBUG-TIME] Attenzione: Arduino ha inviato timestamp 0. Accetto per test.")
 
@@ -415,7 +413,7 @@ def process_register(client: mqtt.Client, m: dict):
         print(f"[REGISTER][ERR] Campi mancanti: {e}")
         return
 
-    # --- AGGIUNGI/AGGIORNA IL DEVICE ORA ---
+    # --- AGGIUNGE/AGGIORNA IL DEVICE ORA ---
     upsert_device(device_id, pubkey_hex)
     print(f"[REGISTER] Device {device_id} censito nel DB (pubkey salvata).")
 
@@ -621,14 +619,14 @@ def on_message(client, userdata, msg):
 def main():
     init_db()
 
-    #Pulizia test: svuota i vecchi errori blockchain per ripartire puliti 
+    # Pulizia test: svuota i vecchi errori blockchain per ripartire puliti 
     conn=sqlite3.connect(DB_PATH)
     conn.cursor().execute("DELETE FROM pending_chain")
     conn.commit()
     conn.close()
     print("[SQL] Coda di retry svuotata per nuovo test")
 
-    # ✅ avvia worker retry in background
+    # avvia worker retry in background
     threading.Thread(target=retry_loop, daemon=True).start()
     print(f"[RETRY] worker attivo (ogni {RETRY_INTERVAL_SEC}s)")
 
